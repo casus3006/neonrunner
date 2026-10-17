@@ -1,0 +1,1730 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Neon Runner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  /* =========================================================
+     Grundlayout & Farbpalette
+     ========================================================= */
+  :root {
+    --cyan:    #00f0ff;
+    --magenta: #ff2bd6;
+    --purple:  #8c1eff;
+    --gold:    #ffd23f;
+    --red:     #ff1a3c;
+    --bg:      #05010f;
+    --panel:   rgba(12, 2, 30, 0.72);
+    --text:    #f2e9ff;
+    --muted:   #b9a6d9;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Orbitron', 'Segoe UI', system-ui, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; }
+
+  /* =========================================================
+     HUD (Punkte & Münzen während des Spiels)
+     ========================================================= */
+  #hud {
+    position: fixed;
+    top: 18px;
+    left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+    transition: opacity .3s;
+    z-index: 5;
+  }
+  #hud.hidden { opacity: 0; }
+
+  .hud-score {
+    font-size: clamp(26px, 4.2vw, 40px);
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #fff;
+    text-shadow: 0 0 6px var(--cyan), 0 0 18px var(--cyan);
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-label {
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .hud-row { display: flex; align-items: center; gap: 14px; }
+  .hud-coins {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gold);
+    text-shadow: 0 0 8px rgba(255, 190, 0, .8);
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-coins.pop { animation: pop .25s ease-out; }
+  @keyframes pop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+  }
+  .hud-small {
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-small b { color: var(--magenta); text-shadow: 0 0 6px var(--magenta); }
+
+  /* =========================================================
+     Mute-Button (oben rechts)
+     ========================================================= */
+  #muteBtn {
+    position: fixed;
+    top: 16px;
+    right: 18px;
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 240, 255, .55);
+    background: rgba(10, 2, 26, .6);
+    color: var(--cyan);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 0 12px rgba(0, 240, 255, .35), inset 0 0 10px rgba(0, 240, 255, .15);
+    transition: transform .15s, box-shadow .15s, color .15s, border-color .15s;
+    z-index: 20;
+  }
+  #muteBtn:hover { transform: scale(1.07); box-shadow: 0 0 20px rgba(0, 240, 255, .6); }
+  #muteBtn svg { width: 24px; height: 24px; fill: currentColor; }
+  #muteBtn .icon-off { display: none; }
+  #muteBtn.muted { color: var(--magenta); border-color: rgba(255, 43, 214, .6); box-shadow: 0 0 12px rgba(255, 43, 214, .35); }
+  #muteBtn.muted .icon-on { display: none; }
+  #muteBtn.muted .icon-off { display: block; }
+
+  /* =========================================================
+     Overlays (Start- & Game-Over-Bildschirm)
+     ========================================================= */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    overflow-y: auto;          /* niedrige Bildschirme: scrollen statt abschneiden */
+    padding: 16px;
+    background: radial-gradient(ellipse at center, rgba(20, 0, 40, .35), rgba(3, 0, 10, .75));
+    z-index: 10;
+    transition: opacity .35s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+
+  .panel {
+    margin: auto;              /* zentriert, ohne beim Überlauf oben abzuschneiden */
+    width: min(520px, 100%);
+    padding: 34px 30px 28px;
+    border-radius: 18px;
+    background: var(--panel);
+    border: 1px solid rgba(255, 43, 214, .45);
+    box-shadow:
+      0 0 30px rgba(255, 43, 214, .25),
+      0 0 80px rgba(140, 30, 255, .2),
+      inset 0 0 30px rgba(0, 240, 255, .06);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    text-align: center;
+  }
+
+  .title {
+    font-size: clamp(40px, 9vw, 68px);
+    font-weight: 900;
+    line-height: .95;
+    letter-spacing: 4px;
+    color: #fff;
+    text-shadow: 0 0 8px var(--magenta), 0 0 24px var(--magenta), 0 0 48px var(--purple);
+  }
+  .title span {
+    display: block;
+    color: var(--cyan);
+    font-size: .62em;
+    letter-spacing: 12px;
+    margin-top: 6px;
+    text-shadow: 0 0 8px var(--cyan), 0 0 24px var(--cyan);
+  }
+  .subtitle {
+    margin: 14px 0 26px;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 2px;
+  }
+
+  .btn {
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #fff;
+    padding: 16px 36px;
+    border-radius: 12px;
+    border: 2px solid var(--cyan);
+    background: linear-gradient(135deg, rgba(0, 240, 255, .18), rgba(255, 43, 214, .18));
+    cursor: pointer;
+    text-shadow: 0 0 8px var(--cyan);
+    box-shadow: 0 0 16px rgba(0, 240, 255, .5), inset 0 0 14px rgba(0, 240, 255, .25);
+    transition: transform .15s, box-shadow .15s, background .15s;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .btn:hover {
+    transform: translateY(-2px) scale(1.03);
+    background: linear-gradient(135deg, rgba(0, 240, 255, .32), rgba(255, 43, 214, .32));
+    box-shadow: 0 0 28px rgba(0, 240, 255, .8), inset 0 0 18px rgba(0, 240, 255, .35);
+  }
+  .btn:active { transform: scale(.98); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 16px rgba(0, 240, 255, .5), inset 0 0 14px rgba(0, 240, 255, .25); }
+    50%      { box-shadow: 0 0 30px rgba(0, 240, 255, .85), inset 0 0 18px rgba(0, 240, 255, .35); }
+  }
+
+  .controls {
+    margin-top: 26px;
+    display: grid;
+    gap: 9px;
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    line-height: 1.6;
+  }
+  .controls .legend { font-size: 11px; opacity: .85; }
+  .controls .red  { color: var(--red); text-shadow: 0 0 6px var(--red); }
+  .controls .pink { color: var(--magenta); text-shadow: 0 0 6px var(--magenta); }
+  .controls .orng { color: #ffb000; text-shadow: 0 0 6px #ffb000; }
+  .controls .gold { color: var(--gold); text-shadow: 0 0 6px var(--gold); }
+
+  kbd {
+    display: inline-block;
+    min-width: 26px;
+    padding: 2px 7px;
+    margin: 0 2px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 240, 255, .6);
+    background: rgba(0, 240, 255, .08);
+    color: var(--cyan);
+    font-family: inherit;
+    font-size: 11px;
+    box-shadow: 0 0 6px rgba(0, 240, 255, .3);
+  }
+
+  .best-line {
+    margin-top: 22px;
+    font-size: 13px;
+    letter-spacing: 2px;
+    color: var(--muted);
+  }
+  .best-line b { color: var(--magenta); text-shadow: 0 0 8px var(--magenta); }
+
+  /* Game-Over */
+  .go-title {
+    font-size: clamp(36px, 8vw, 56px);
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: #fff;
+    text-shadow: 0 0 8px var(--red), 0 0 26px var(--red), 0 0 50px var(--magenta);
+  }
+  .record {
+    margin-top: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--gold);
+    text-shadow: 0 0 10px var(--gold);
+    animation: blink 1s steps(2, start) infinite;
+  }
+  .record.hidden { display: none; }
+  @keyframes blink { to { visibility: hidden; } }
+
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 24px 0 26px;
+  }
+  .stat {
+    padding: 12px 8px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(140, 30, 255, .4);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .stat .label { font-size: 10px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
+  .stat .value { font-size: 24px; font-weight: 900; color: #fff; text-shadow: 0 0 8px var(--cyan); font-variant-numeric: tabular-nums; }
+  .stat .value.gold { color: var(--gold); text-shadow: 0 0 8px rgba(255, 190, 0, .9); }
+  .stat .value.pink { color: var(--magenta); text-shadow: 0 0 8px var(--magenta); }
+  .hint { margin-top: 14px; font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+
+  /* Pause */
+  .pause-panel { width: min(360px, 100%); cursor: pointer; }
+  .pause-title {
+    font-size: 40px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: #fff;
+    text-shadow: 0 0 8px var(--cyan), 0 0 24px var(--cyan);
+  }
+
+  /* Weißer Blitz beim Crash */
+  #flash {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255, 255, 255, .95), rgba(255, 43, 214, .5));
+    opacity: 0;
+    pointer-events: none;
+    z-index: 8;
+  }
+  #flash.on { animation: flash .5s ease-out; }
+  @keyframes flash { 0% { opacity: .6; } 100% { opacity: 0; } }
+
+  /* Fehlermeldung, falls WebGL / Three.js fehlt */
+  #error {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--bg);
+    z-index: 50;
+  }
+
+  @media (max-width: 520px) {
+    .panel { padding: 26px 18px 22px; }
+    .btn { font-size: 15px; padding: 14px 26px; }
+    #hud { top: 12px; left: 14px; }
+    #muteBtn { top: 12px; right: 12px; }
+  }
+
+  /* Niedrige Bildschirme (z.B. Handy quer): alles kompakter */
+  @media (max-height: 560px) {
+    .overlay { padding: 10px 64px; }
+    .panel { padding: 16px 18px 14px; }
+    .title { font-size: 34px; }
+    .subtitle { margin: 6px 0 12px; font-size: 11px; }
+    .controls { margin-top: 12px; gap: 4px; }
+    .controls .legend:last-child { display: none; }
+    .best-line { margin-top: 10px; }
+    .go-title { font-size: 30px; }
+    .record { margin-top: 4px; font-size: 12px; }
+    .stats { margin: 12px 0 14px; gap: 8px; }
+    .stat { padding: 6px; }
+    .stat .value { font-size: 18px; }
+    .btn { padding: 11px 24px; font-size: 14px; }
+    .hint { margin-top: 8px; }
+  }
+  @media (max-height: 560px) and (max-width: 520px) {
+    .overlay { padding: 64px 10px 10px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 3D-Canvas-Container -->
+<div id="game"></div>
+
+<!-- HUD während des Spiels -->
+<div id="hud" class="hidden">
+  <div class="hud-label">Punkte</div>
+  <div class="hud-score" id="hudScore">0</div>
+  <div class="hud-row">
+    <div class="hud-coins" id="hudCoins">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="#ffd23f"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z"/></svg>
+      <span id="hudCoinCount">0</span>
+    </div>
+    <div class="hud-small">Tempo <b id="hudSpeed">1.0x</b></div>
+  </div>
+  <div class="hud-small">Highscore <span id="hudBest">0</span></div>
+</div>
+
+<!-- Mute-Button oben rechts -->
+<button id="muteBtn" title="Ton an/aus (M)" aria-label="Ton an/aus">
+  <svg class="icon-on" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3z"/><path d="M16.5 12A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>
+  <svg class="icon-off" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3z"/><path d="M15.5 8.9l1.4-1.4 2.6 2.6 2.6-2.6 1.4 1.4-2.6 2.6 2.6 2.6-1.4 1.4-2.6-2.6-2.6 2.6-1.4-1.4 2.6-2.6z"/></svg>
+</button>
+
+<!-- Startbildschirm -->
+<div id="startScreen" class="overlay">
+  <div class="panel">
+    <h1 class="title">NEON<span>RUNNER</span></h1>
+    <p class="subtitle">SYNTHWAVE · ENDLESS · RUNNER</p>
+    <button id="startBtn" class="btn">Spiel starten</button>
+    <div class="controls">
+      <div><kbd>A</kbd><kbd>D</kbd> oder <kbd>←</kbd><kbd>→</kbd> Spur wechseln</div>
+      <div><kbd>Leertaste</kbd> Springen &nbsp;·&nbsp; <kbd>P</kbd> Pause &nbsp;·&nbsp; <kbd>M</kbd> Ton</div>
+      <div class="legend">
+        Weiche <span class="red">roten Blöcken</span> aus · springe über
+        <span class="pink">Neon-</span>/<span class="orng">Warn-Barrieren</span> ·
+        sammle <span class="gold">★ Sterne</span>
+      </div>
+      <div class="legend">Mobil: Wischen = Spurwechsel, Tippen = Springen</div>
+    </div>
+    <div class="best-line">HIGHSCORE: <b id="startBest">0</b></div>
+  </div>
+</div>
+
+<!-- Game-Over-Bildschirm -->
+<div id="gameOverScreen" class="overlay hidden">
+  <div class="panel">
+    <h2 class="go-title">GAME OVER</h2>
+    <div id="newRecord" class="record hidden">★ NEUER HIGHSCORE ★</div>
+    <div class="stats">
+      <div class="stat"><span class="label">Punkte</span><span class="value" id="finalScore">0</span></div>
+      <div class="stat"><span class="label">Münzen</span><span class="value gold" id="finalCoins">0</span></div>
+      <div class="stat"><span class="label">Distanz</span><span class="value" id="finalDist">0 m</span></div>
+      <div class="stat"><span class="label">Highscore</span><span class="value pink" id="finalBest">0</span></div>
+    </div>
+    <button id="retryBtn" class="btn">Erneut versuchen</button>
+    <div class="hint">oder <kbd>Enter</kbd> drücken</div>
+  </div>
+</div>
+
+<!-- Pause-Hinweis -->
+<div id="pauseScreen" class="overlay hidden">
+  <div class="panel pause-panel">
+    <h2 class="pause-title">PAUSE</h2>
+    <div class="hint"><kbd>P</kbd> / <kbd>Esc</kbd> oder Tippen zum Fortsetzen</div>
+  </div>
+</div>
+
+<div id="flash"></div>
+<div id="error"></div>
+
+<!-- Three.js (r128) + Post-Processing für den Neon-Glow (Bloom) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+'use strict';
+
+/* =============================================================
+   NEON RUNNER – ein Synthwave-Endless-Runner mit Three.js
+   -------------------------------------------------------------
+   Aufbau:
+     1. Konfiguration & Hilfsfunktionen
+     2. Speicher (LocalStorage, abgesichert)
+     3. Sound-Engine (Web Audio API, komplett synthetisch)
+     4. Szene, Kamera, Renderer, Bloom
+     5. Umgebung (Himmel, Sonne, Sterne, Grid, Strecke, Berge)
+     6. Spieler-Raumschiff
+     7. Partikelsysteme (Schweif, Explosion, Funken)
+     8. Hindernisse & Sterne (Collectibles)
+     9. Spiellogik (Spawnen, Kollision, Punkte)
+    10. Eingabe (Tastatur, Touch, Buttons)
+    11. Hauptschleife
+   ============================================================= */
+
+/* ---------- Abbruch, falls Three.js nicht geladen werden konnte ---------- */
+if (typeof THREE === 'undefined') {
+  const err = document.getElementById('error');
+  err.style.display = 'flex';
+  err.innerHTML = 'Three.js konnte nicht geladen werden.<br>Bitte prüfe deine Internetverbindung und lade die Seite neu.';
+  throw new Error('THREE not loaded');
+}
+
+/* =============================================================
+   1. KONFIGURATION & HILFSFUNKTIONEN
+   ============================================================= */
+const CONFIG = {
+  LANE_WIDTH:    2.6,    // Abstand zwischen den Spuren
+  START_SPEED:   18,     // Einheiten pro Sekunde zu Beginn
+  MAX_SPEED:     54,     // Höchstgeschwindigkeit
+  ACCEL:         0.42,   // Geschwindigkeitszuwachs pro Sekunde
+  MENU_SPEED:    12,     // Scroll-Tempo im Hauptmenü
+  GRAVITY:       34,     // Schwerkraft beim Sprung
+  JUMP_VELOCITY: 11.8,   // Absprunggeschwindigkeit (≈ 2 Einheiten Sprunghöhe)
+  SPAWN_Z:       -165,   // Hier tauchen neue Hindernisse auf
+  DESPAWN_Z:     14,     // Hinter der Kamera werden Objekte entfernt
+  COIN_POINTS:   25,     // Bonuspunkte pro Stern
+  START_GRACE:   1.6,    // Sekunden ohne Hindernisse beim Start
+  ROW_INTERVAL_START: 1.25, // Sekunden zwischen Hindernisreihen (Start)
+  ROW_INTERVAL_MIN:   0.62, // ... minimal
+  PLAYER_HALF_W: 0.55,   // Hitbox des Spielers (etwas großzügig)
+  PLAYER_HALF_D: 0.7,
+  SHIP_BASE_Y:   0.5     // Schwebehöhe des Schiffs über dem Boden
+};
+const LANES = [-CONFIG.LANE_WIDTH, 0, CONFIG.LANE_WIDTH];
+
+const rand    = (a, b) => a + Math.random() * (b - a);
+const randInt = n => Math.floor(Math.random() * n);
+const clamp   = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp    = (a, b, t) => a + (b - a) * t;
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return [c, c.getContext('2d')];
+}
+const fmt = n => Math.floor(n).toLocaleString('de-DE');
+
+/* =============================================================
+   2. SPEICHER (LocalStorage kann im privaten Modus fehlen)
+   ============================================================= */
+const Store = {
+  get(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : v;
+    } catch (e) { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, String(value)); } catch (e) { /* ignorieren */ }
+  }
+};
+const KEY_HIGHSCORE = 'neonRunner.highscore';
+const KEY_MUTED     = 'neonRunner.muted';
+
+/* =============================================================
+   3. SOUND-ENGINE (Web Audio API, keine Audio-Dateien)
+   ============================================================= */
+const Sound = (() => {
+  let ctx = null;        // AudioContext (erst nach User-Geste erzeugen)
+  let master = null;     // Master-Lautstärke (für Mute)
+  let noiseBuf = null;   // Weißes Rauschen für Swoosh & Explosion
+  let muted = Store.get(KEY_MUTED, '0') === '1';
+  const VOLUME = 0.7;
+
+  /** Erzeugt den AudioContext – muss aus einem Klick/Tastendruck heraus passieren. */
+  function init() {
+    if (ctx) {
+      if (ctx.state === 'suspended') ctx.resume();
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+
+    // Kompressor verhindert Übersteuern, wenn mehrere Sounds gleichzeitig laufen
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -10;
+    comp.ratio.value = 6;
+    comp.connect(ctx.destination);
+
+    master = ctx.createGain();
+    master.gain.value = muted ? 0 : VOLUME;
+    master.connect(comp);
+
+    // 2 Sekunden weißes Rauschen vorberechnen
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  }
+
+  const ready = () => ctx !== null && master !== null && ctx.state !== 'closed';
+
+  /** Einfache Hüllkurve: schneller Anstieg, exponentielles Abklingen. */
+  function envelope(gain, t, attack, peak, decay) {
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(peak, t + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  }
+
+  /** Oszillator-Ton mit Frequenzverlauf f0 → f1. */
+  function tone(type, f0, f1, dur, vol, delay = 0) {
+    const t = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) osc.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    envelope(g, t, 0.005, vol, dur);
+    osc.connect(g);
+    g.connect(master);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  }
+
+  /** Gefiltertes Rauschen mit Filter-Sweep f0 → f1. */
+  function noise(dur, vol, filterType, f0, f1, q = 1, delay = 0) {
+    const t = ctx.currentTime + delay;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.Q.value = q;
+    filter.frequency.setValueAtTime(f0, t);
+    filter.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain();
+    envelope(g, t, 0.01, vol, dur);
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(master);
+    src.start(t);
+    src.stop(t + dur + 0.05);
+  }
+
+  return {
+    init,
+    isMuted: () => muted,
+
+    toggleMute() {
+      muted = !muted;
+      Store.set(KEY_MUTED, muted ? '1' : '0');
+      if (ready()) master.gain.setTargetAtTime(muted ? 0 : VOLUME, ctx.currentTime, 0.02);
+      return muted;
+    },
+
+    /** Spurwechsel: kurzer, fallender Beep + Luft-Swoosh. */
+    lane() {
+      if (!ready()) return;
+      tone('triangle', 660, 330, 0.09, 0.16);
+      noise(0.14, 0.10, 'bandpass', 3200, 700, 1.8);
+    },
+
+    /** Sprung: schnell ansteigender Retro-Ton. */
+    jump() {
+      if (!ready()) return;
+      tone('square', 200, 820, 0.2, 0.08);
+      tone('sine', 400, 1640, 0.2, 0.08);
+    },
+
+    /** Stern eingesammelt: klassisches zweistufiges "Ping". */
+    coin() {
+      if (!ready()) return;
+      tone('square', 988, 988, 0.06, 0.06);
+      tone('square', 1319, 1319, 0.22, 0.06, 0.06);
+      tone('sine', 2637, 2637, 0.2, 0.04, 0.06);
+    },
+
+    /** Crash: tiefes Rauschen + abfallender Bass-Wumms. */
+    crash() {
+      if (!ready()) return;
+      noise(1.5, 0.9, 'lowpass', 5000, 60, 0.7);
+      noise(0.25, 0.5, 'highpass', 6000, 1500, 0.5);
+      tone('sine', 170, 28, 1.0, 0.7);
+      tone('sawtooth', 95, 24, 0.8, 0.22);
+    },
+
+    /** Start-Jingle: kurzes aufsteigendes Arpeggio. */
+    start() {
+      if (!ready()) return;
+      [523, 659, 784, 1047].forEach((f, i) => tone('square', f, f, 0.12, 0.05, i * 0.07));
+    }
+  };
+})();
+
+/* =============================================================
+   4. SZENE, KAMERA, RENDERER & BLOOM
+   ============================================================= */
+const container = document.getElementById('game');
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+} catch (e) {
+  const err = document.getElementById('error');
+  err.style.display = 'flex';
+  err.textContent = 'WebGL wird von deinem Browser nicht unterstützt.';
+  throw e;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+renderer.setSize(window.innerWidth, window.innerHeight);
+container.appendChild(renderer.domElement);
+
+const FOG_COLOR = 0x2a0845;
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(FOG_COLOR, 40, 175);
+
+const BASE_FOV = 66;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 1200);
+camera.position.set(0, 3.3, 7.2);
+const camLook = new THREE.Vector3(0, 1.1, -8);
+camera.lookAt(camLook);
+
+// Bloom-Post-Processing für echten Neon-Glow (Fallback: normales Rendering)
+let composer = null;
+let bloomPass = null;
+if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass && THREE.CopyShader) {
+  try {
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    bloomPass = new THREE.UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      1.05,  // Stärke
+      0.55,  // Radius
+      0.2    // Schwellenwert
+    );
+    composer.addPass(bloomPass);
+  } catch (e) {
+    console.warn('Bloom nicht verfügbar, rendere ohne Post-Processing.', e);
+    composer = null;
+  }
+}
+
+// Licht: violettes Grundlicht, pinkes Führungslicht, cyanfarbenes Schiffslicht
+scene.add(new THREE.AmbientLight(0x7a5cff, 0.55));
+const keyLight = new THREE.DirectionalLight(0xff77dd, 0.9);
+keyLight.position.set(-6, 10, 8);
+scene.add(keyLight);
+const shipLight = new THREE.PointLight(0x00f0ff, 2.2, 9, 2);
+scene.add(shipLight);
+
+/* =============================================================
+   5. UMGEBUNG
+   ============================================================= */
+
+/* ---------- Himmel: vertikaler Farbverlauf ---------- */
+(function createSky() {
+  const [c, g] = makeCanvas(4, 512);
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0.00, '#030010');
+  grad.addColorStop(0.35, '#12022e');
+  grad.addColorStop(0.55, '#2a0845');
+  grad.addColorStop(1.00, '#2a0845');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 512);
+  const tex = new THREE.CanvasTexture(c);
+  scene.background = tex;
+})();
+
+/* ---------- Weiches Partikel-Sprite (wird mehrfach verwendet) ---------- */
+const glowTexture = (() => {
+  const [c, g] = makeCanvas(64, 64);
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(0.6, 'rgba(255,255,255,0.15)');
+  grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+
+/* ---------- Retro-Sonne mit Streifen ---------- */
+(function createSun() {
+  const S = 512;
+  const [c, g] = makeCanvas(S, S);
+  const grad = g.createLinearGradient(0, 0, 0, S);
+  grad.addColorStop(0.00, '#ffe66b');
+  grad.addColorStop(0.40, '#ff8a3d');
+  grad.addColorStop(0.70, '#ff2975');
+  grad.addColorStop(1.00, '#a3189e');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(S / 2, S / 2, S / 2 - 4, 0, Math.PI * 2);
+  g.fill();
+  // Typische Synthwave-Streifen in der unteren Hälfte herausschneiden
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 9; i++) {
+    const y = S * 0.48 + i * i * 2.6 + i * 16;
+    g.fillRect(0, y, S, 2 + i * 2.1);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  const sun = new THREE.Mesh(
+    new THREE.PlaneGeometry(150, 150),
+    new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: false, color: 0xdddddd })
+  );
+  sun.position.set(0, 24, -420);
+  scene.add(sun);
+})();
+
+/* ---------- Sterne am Himmel ---------- */
+(function createStars() {
+  const N = 500;
+  const pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    pos[i * 3]     = rand(-650, 650);
+    pos[i * 3 + 1] = rand(15, 320);
+    pos[i * 3 + 2] = rand(-470, -440);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const stars = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false,
+    transparent: true, opacity: 0.85
+  }));
+  scene.add(stars);
+})();
+
+/* ---------- Leuchtendes Boden-Grid (scrollende Textur) ---------- */
+const GRID_TILE = 4;           // Größe einer Rasterzelle in Welteinheiten
+const gridTexture = (() => {
+  const S = 256;
+  const [c, g] = makeCanvas(S, S);
+  g.fillStyle = '#0a0118';
+  g.fillRect(0, 0, S, S);
+  // Linien in der Mitte der Kachel, damit der Glow symmetrisch kachelt
+  g.shadowColor = '#ff2bd6';
+  g.shadowBlur = 14;
+  g.fillStyle = '#e830ff';
+  g.fillRect(0, S / 2 - 3, S, 6);
+  g.fillRect(S / 2 - 3, 0, 6, S);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+})();
+const GROUND_W = 240, GROUND_L = 520;
+gridTexture.repeat.set(GROUND_W / GRID_TILE, GROUND_L / GRID_TILE);
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(GROUND_W, GROUND_L),
+  new THREE.MeshBasicMaterial({ map: gridTexture })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.z = 60 - GROUND_L / 2;   // reicht von z=+60 bis weit in die Ferne
+scene.add(ground);
+
+/* ---------- Fahrbahn: dunkle Fläche + Neon-Leitplanken ---------- */
+(function createTrack() {
+  const trackW = CONFIG.LANE_WIDTH * 3;
+  const track = new THREE.Mesh(
+    new THREE.PlaneGeometry(trackW, GROUND_L),
+    new THREE.MeshBasicMaterial({ color: 0x05000c, transparent: true, opacity: 0.6 })
+  );
+  track.rotation.x = -Math.PI / 2;
+  track.position.set(0, 0.01, ground.position.z);
+  scene.add(track);
+
+  const railGeo = new THREE.BoxGeometry(0.1, 0.06, GROUND_L);
+  const edgeMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+  const divMat  = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.3 });
+  [-1.5, 1.5].forEach(k => {
+    const rail = new THREE.Mesh(railGeo, edgeMat);
+    rail.position.set(k * CONFIG.LANE_WIDTH, 0.03, ground.position.z);
+    scene.add(rail);
+  });
+  [-0.5, 0.5].forEach(k => {
+    const div = new THREE.Mesh(railGeo, divMat);
+    div.position.set(k * CONFIG.LANE_WIDTH, 0.02, ground.position.z);
+    scene.add(div);
+  });
+})();
+
+/* ---------- Wireframe-Berge links & rechts (nahtlos endlos) ---------- */
+const MOUNTAIN_L = 200;
+const mountainSegments = [];
+(function createMountains() {
+  const W = 80, SX = 22, SZ = 40;
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: 0x0a0016, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+  });
+  const wireMat = new THREE.MeshBasicMaterial({
+    color: 0xb21cff, wireframe: true, transparent: true, opacity: 0.75
+  });
+
+  [-1, 1].forEach(side => {
+    const geo = new THREE.PlaneGeometry(W, MOUNTAIN_L, SX, SZ);
+    const pos = geo.attributes.position;
+    // Zufallshöhen; letzte Reihe = erste Reihe → Segmente passen nahtlos aneinander
+    const rnd = [];
+    for (let j = 0; j < SZ; j++) {
+      rnd[j] = [];
+      for (let i = 0; i <= SX; i++) rnd[j][i] = Math.random();
+    }
+    for (let j = 0; j <= SZ; j++) {
+      for (let i = 0; i <= SX; i++) {
+        const k = j * (SX + 1) + i;
+        const lx = pos.getX(k);
+        // d = 0 an der Innenkante (zur Strecke hin), 1 am äußeren Rand
+        const d = side > 0 ? (lx + W / 2) / W : (W / 2 - lx) / W;
+        const r = rnd[j % SZ][i];
+        const h = d < 0.06 ? 0 : Math.pow(d, 1.15) * (5 + r * 24) * (0.75 + 0.25 * Math.sin(j * 0.7 + side));
+        pos.setZ(k, Math.max(0, h));
+      }
+    }
+    geo.rotateX(-Math.PI / 2);
+    geo.computeVertexNormals();
+
+    for (let s = 0; s < 3; s++) {
+      const seg = new THREE.Group();
+      seg.add(new THREE.Mesh(geo, fillMat));
+      seg.add(new THREE.Mesh(geo, wireMat));
+      seg.position.set(side * (W / 2 + 7), 0, -MOUNTAIN_L / 2 - s * MOUNTAIN_L);
+      scene.add(seg);
+      mountainSegments.push(seg);
+    }
+  });
+})();
+
+/** Bewegt Grid und Berge – erzeugt die Illusion von Vorwärtsbewegung. */
+function scrollEnvironment(dist) {
+  gridTexture.offset.y = (gridTexture.offset.y + dist / GRID_TILE) % 1;
+  for (const seg of mountainSegments) {
+    seg.position.z += dist;
+    if (seg.position.z - MOUNTAIN_L / 2 > 20) seg.position.z -= MOUNTAIN_L * 3;
+  }
+}
+
+/* =============================================================
+   6. SPIELER-RAUMSCHIFF
+   ============================================================= */
+const ship = (() => {
+  const group = new THREE.Group();
+
+  const hullMat = new THREE.MeshStandardMaterial({
+    color: 0x0b1a2e, emissive: 0x00c8ff, emissiveIntensity: 0.35,
+    metalness: 0.6, roughness: 0.3, flatShading: true
+  });
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0x8ffcff });
+  const pinkMat = new THREE.MeshBasicMaterial({ color: 0xff2bd6 });
+
+  // Rumpf: flache vierseitige Pyramide, Spitze zeigt nach vorne (-z)
+  const hullGeo = new THREE.ConeGeometry(0.42, 1.7, 4);
+  hullGeo.rotateX(-Math.PI / 2);
+  hullGeo.scale(1, 0.5, 1);
+  const hull = new THREE.Mesh(hullGeo, hullMat);
+  hull.add(new THREE.LineSegments(new THREE.EdgesGeometry(hullGeo), edgeMat));
+  group.add(hull);
+
+  // Delta-Flügel (Shape → extrudiert → flach gelegt)
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0.45);      // vorne
+  wingShape.lineTo(1.05, -0.6);   // rechte Spitze (hinten)
+  wingShape.lineTo(0, -0.3);      // Kerbe hinten
+  wingShape.lineTo(-1.05, -0.6);  // linke Spitze
+  wingShape.closePath();
+  const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.06, bevelEnabled: false });
+  wingGeo.rotateX(-Math.PI / 2);
+  wingGeo.translate(0, -0.06, 0.15);
+  const wings = new THREE.Mesh(wingGeo, hullMat);
+  wings.add(new THREE.LineSegments(new THREE.EdgesGeometry(wingGeo), edgeMat));
+  group.add(wings);
+
+  // Pinke Seitenleitwerke an den Flügelspitzen
+  const finGeo = new THREE.BoxGeometry(0.05, 0.32, 0.36);
+  [-1, 1].forEach(s => {
+    const fin = new THREE.Mesh(finGeo, pinkMat);
+    fin.position.set(s * 0.98, 0.12, 0.66);
+    group.add(fin);
+  });
+
+  // Cockpit-Kuppel
+  const cockpit = new THREE.Mesh(
+    new THREE.SphereGeometry(0.17, 14, 10),
+    new THREE.MeshBasicMaterial({ color: 0xff5ce6, transparent: true, opacity: 0.9 })
+  );
+  cockpit.scale.set(1, 0.6, 1.9);
+  cockpit.position.set(0, 0.13, -0.05);
+  group.add(cockpit);
+
+  // Triebwerks-Glühen
+  const engine = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xbffcff })
+  );
+  engine.position.set(0, 0, 0.86);
+  group.add(engine);
+  const engineHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture, color: 0x00f0ff, blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false
+  }));
+  engineHalo.scale.set(1.1, 1.1, 1);
+  engineHalo.position.copy(engine.position);
+  group.add(engineHalo);
+
+  scene.add(group);
+  return { group, engine, engineHalo };
+})();
+
+/* =============================================================
+   7. PARTIKELSYSTEME
+   ============================================================= */
+class ParticleSystem {
+  /**
+   * @param {number} max   maximale Anzahl Partikel (Ringpuffer)
+   * @param {number} size  Sprite-Größe in Welteinheiten
+   * @param {number} drag  Luftwiderstand (0 = keiner)
+   */
+  constructor(max, size, drag = 0) {
+    this.max = max;
+    this.drag = drag;
+    this.cursor = 0;
+    this.pos   = new Float32Array(max * 3);
+    this.col   = new Float32Array(max * 3);
+    this.base  = new Float32Array(max * 3);
+    this.vel   = new Float32Array(max * 3);
+    this.life  = new Float32Array(max);
+    this.total = new Float32Array(max);
+    this.grav  = new Float32Array(max);
+    for (let i = 0; i < max; i++) this.pos[i * 3 + 1] = -1000;  // unsichtbar parken
+
+    this.geo = new THREE.BufferGeometry();
+    this.posAttr = new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage);
+    this.colAttr = new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage);
+    this.geo.setAttribute('position', this.posAttr);
+    this.geo.setAttribute('color', this.colAttr);
+
+    this.points = new THREE.Points(this.geo, new THREE.PointsMaterial({
+      size, map: glowTexture, vertexColors: true, transparent: true,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+    }));
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+
+  emit(x, y, z, vx, vy, vz, life, r, g, b, gravity = 0) {
+    const i = this.cursor;
+    this.cursor = (i + 1) % this.max;
+    const k = i * 3;
+    this.pos[k] = x;   this.pos[k + 1] = y;   this.pos[k + 2] = z;
+    this.vel[k] = vx;  this.vel[k + 1] = vy;  this.vel[k + 2] = vz;
+    this.base[k] = r;  this.base[k + 1] = g;  this.base[k + 2] = b;
+    this.life[i] = this.total[i] = life;
+    this.grav[i] = gravity;
+  }
+
+  update(dt) {
+    const dragF = this.drag > 0 ? Math.max(0, 1 - this.drag * dt) : 1;
+    for (let i = 0; i < this.max; i++) {
+      if (this.life[i] <= 0) continue;
+      const k = i * 3;
+      this.life[i] -= dt;
+      if (this.life[i] <= 0) {
+        this.col[k] = this.col[k + 1] = this.col[k + 2] = 0;
+        this.pos[k + 1] = -1000;
+        continue;
+      }
+      this.vel[k + 1] -= this.grav[i] * dt;
+      this.vel[k] *= dragF; this.vel[k + 1] *= dragF; this.vel[k + 2] *= dragF;
+      this.pos[k]     += this.vel[k] * dt;
+      this.pos[k + 1] += this.vel[k + 1] * dt;
+      this.pos[k + 2] += this.vel[k + 2] * dt;
+      if (this.pos[k + 1] < 0.02) { this.pos[k + 1] = 0.02; this.vel[k + 1] *= -0.4; } // Boden-Abpraller
+      const t = this.life[i] / this.total[i];      // 1 → 0: Ausblenden (additiv: schwarz = unsichtbar)
+      const f = t * t * (3 - 2 * t);
+      this.col[k]     = this.base[k] * f;
+      this.col[k + 1] = this.base[k + 1] * f;
+      this.col[k + 2] = this.base[k + 2] * f;
+    }
+    this.posAttr.needsUpdate = true;
+    this.colAttr.needsUpdate = true;
+  }
+
+  /** Verschiebt alle Partikel (z.B. wenn sich die Welt bewegt). */
+  shiftZ(dz) {
+    for (let i = 0; i < this.max; i++) if (this.life[i] > 0) this.pos[i * 3 + 2] += dz;
+  }
+
+  clear() {
+    this.life.fill(0);
+    this.col.fill(0);
+    for (let i = 0; i < this.max; i++) this.pos[i * 3 + 1] = -1000;
+    this.posAttr.needsUpdate = this.colAttr.needsUpdate = true;
+  }
+}
+
+const trail  = new ParticleSystem(700, 0.38);        // Triebwerks-Schweif
+const sparks = new ParticleSystem(400, 0.32, 2.5);   // Funken beim Einsammeln
+const burst  = new ParticleSystem(900, 0.34, 1.2);   // Explosion
+
+const effects = [];   // kurzlebige Effekte (z.B. Schockwellen-Ring)
+
+let trailAccumulator = 0;
+/** Leuchtender Schweif hinter dem Schiff. */
+function emitTrail(dt, worldSpeed) {
+  trailAccumulator += dt * 110;   // ca. 110 Partikel pro Sekunde
+  const p = ship.group.position;
+  while (trailAccumulator >= 1) {
+    trailAccumulator -= 1;
+    const pink = Math.random() < 0.4;
+    trail.emit(
+      p.x + rand(-0.1, 0.1), p.y + rand(-0.06, 0.06), p.z + 0.9,
+      rand(-0.4, 0.4), rand(-0.25, 0.25), worldSpeed * 0.55 + 2,
+      rand(0.22, 0.42),
+      pink ? 1.0 : 0.1, pink ? 0.2 : 0.85, 1.0
+    );
+  }
+}
+
+/** Funkenregen beim Einsammeln eines Sterns. */
+function emitSparkle(x, y, z) {
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, s = rand(2, 7);
+    sparks.emit(x, y, z, Math.cos(a) * s, Math.sin(a) * s + 1.5, rand(-2, 2),
+      rand(0.3, 0.6), 1.0, rand(0.65, 0.85), 0.15, 6);
+  }
+}
+
+/** Große Partikel-Explosion + Schockwelle beim Zusammenstoß. */
+function explode(x, y, z) {
+  const palette = [[0, 0.95, 1], [1, 0.17, 0.84], [1, 1, 1], [1, 0.55, 0.1], [0.55, 0.12, 1]];
+  for (let i = 0; i < 280; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const u = Math.random() * 2 - 1;
+    const s = Math.sqrt(1 - u * u);
+    const sp = rand(3, 15);
+    const c = palette[randInt(palette.length)];
+    const k = rand(0.55, 0.9);   // etwas abgedunkelt, damit der Bloom nicht alles überstrahlt
+    burst.emit(x, y, z,
+      Math.cos(theta) * s * sp,
+      Math.abs(u) * sp * 0.9 + 2,
+      Math.min(3, Math.sin(theta) * s * sp) - 2,   // kaum Richtung Kamera fliegen lassen
+      rand(0.7, 1.7), c[0] * k, c[1] * k, c[2] * k, 11);
+  }
+  // Expandierender Neon-Ring
+  [0xff2bd6, 0x00f0ff].forEach((color, idx) => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.6, 0.85, 64),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 1, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      })
+    );
+    ring.position.set(x, y, z);
+    ring.lookAt(camera.position);
+    scene.add(ring);
+    let age = -idx * 0.08;
+    effects.push(dt => {
+      age += dt;
+      if (age < 0) return true;
+      const s = 1 + age * 13;
+      ring.scale.set(s, s, s);
+      ring.material.opacity = 0.8 * Math.max(0, 1 - age / 0.7);
+      if (age >= 0.7) {
+        scene.remove(ring);
+        ring.geometry.dispose();
+        ring.material.dispose();
+        return false;
+      }
+      return true;
+    });
+  });
+}
+
+/* =============================================================
+   8. HINDERNISSE & STERNE
+   ============================================================= */
+
+/* ---------- Gemeinsame Geometrien/Materialien (spart Speicher) ---------- */
+const OBST_TYPES = {
+  // Rote Blöcke – zu hoch zum Springen, nur ausweichen
+  block: { hw: 1.0, h: 1.9, hd: 0.6 },
+  // Niedrige Neon-Barriere (pink) – überspringbar
+  low:   { hw: 1.15, h: 0.8, hd: 0.2 },
+  // Breite Warn-Barriere (orange) über alle Spuren – muss übersprungen werden
+  wide:  { hw: CONFIG.LANE_WIDTH * 1.5 - 0.1, h: 0.8, hd: 0.2 }
+};
+
+const blockAssets = (() => {
+  const t = OBST_TYPES.block;
+  const geo = new THREE.BoxGeometry(t.hw * 2, t.h, t.hd * 2);
+  geo.translate(0, t.h / 2, 0);
+  return {
+    geo,
+    edges: new THREE.EdgesGeometry(geo),
+    mat: new THREE.MeshStandardMaterial({
+      color: 0x3a0008, emissive: 0xff0a2a, emissiveIntensity: 0.5,
+      metalness: 0.3, roughness: 0.35
+    }),
+    edgeMat: new THREE.LineBasicMaterial({ color: 0xff6a85 }),
+    bandGeo: new THREE.BoxGeometry(t.hw * 2 + 0.04, 0.12, t.hd * 2 + 0.04),
+    bandMat: new THREE.MeshBasicMaterial({ color: 0xff3355 })
+  };
+})();
+
+function makeBarrierAssets(hw, color) {
+  const barGeo = new THREE.BoxGeometry(hw * 2, 0.26, 0.24);
+  return {
+    barGeo,
+    barEdges: new THREE.EdgesGeometry(barGeo),
+    barMat: new THREE.MeshBasicMaterial({ color }),
+    edgeMat: new THREE.LineBasicMaterial({ color: 0xffffff }),
+    postGeo: new THREE.BoxGeometry(0.14, 0.8, 0.14),
+    postMat: new THREE.MeshStandardMaterial({ color: 0x14001f, emissive: color, emissiveIntensity: 0.4 }),
+    holoGeo: new THREE.PlaneGeometry(hw * 2 - 0.25, 0.48),
+    holoMat: new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    })
+  };
+}
+const lowAssets  = makeBarrierAssets(OBST_TYPES.low.hw, 0xff2bd6);
+const wideAssets = makeBarrierAssets(OBST_TYPES.wide.hw, 0xffaa00);
+
+function buildBlockMesh() {
+  const a = blockAssets;
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(a.geo, a.mat));
+  g.add(new THREE.LineSegments(a.edges, a.edgeMat));
+  const band = new THREE.Mesh(a.bandGeo, a.bandMat);
+  band.position.y = OBST_TYPES.block.h * 0.72;
+  g.add(band);
+  return g;
+}
+
+function buildBarrierMesh(type) {
+  const a = type === 'wide' ? wideAssets : lowAssets;
+  const hw = OBST_TYPES[type].hw;
+  const g = new THREE.Group();
+  const bar = new THREE.Mesh(a.barGeo, a.barMat);
+  bar.position.y = 0.66;
+  bar.add(new THREE.LineSegments(a.barEdges, a.edgeMat));
+  g.add(bar);
+  [-1, 1].forEach(s => {
+    const post = new THREE.Mesh(a.postGeo, a.postMat);
+    post.position.set(s * (hw - 0.07), 0.4, 0);
+    g.add(post);
+  });
+  const holo = new THREE.Mesh(a.holoGeo, a.holoMat);
+  holo.position.y = 0.3;
+  g.add(holo);
+  return g;
+}
+
+/* ---------- Goldene Neon-Sterne ---------- */
+const starAssets = (() => {
+  const shape = new THREE.Shape();
+  const spikes = 5, outer = 0.5, inner = 0.21;
+  for (let i = 0; i < spikes * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = (i / (spikes * 2)) * Math.PI * 2 + Math.PI / 2;
+    const x = Math.cos(a) * r, y = Math.sin(a) * r;
+    if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.12, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.03, bevelSegments: 1
+  });
+  geo.center();
+  return {
+    geo,
+    mat: new THREE.MeshStandardMaterial({
+      color: 0xffc21a, emissive: 0xc77700, emissiveIntensity: 0.55,
+      metalness: 0.75, roughness: 0.3
+    }),
+    edges: new THREE.EdgesGeometry(geo, 30),
+    edgeMat: new THREE.LineBasicMaterial({ color: 0xfff1a8 }),
+    haloMat: new THREE.SpriteMaterial({
+      map: glowTexture, color: 0xff9d00, transparent: true, opacity: 0.22,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    })
+  };
+})();
+
+const obstacles = [];  // { mesh, type, x }
+const coins     = [];  // { mesh, x, baseY, phase }
+
+function spawnObstacle(type, lane, z) {
+  const mesh = type === 'block' ? buildBlockMesh() : buildBarrierMesh(type);
+  const x = type === 'wide' ? 0 : LANES[lane];
+  mesh.position.set(x, 0, z);
+  scene.add(mesh);
+  obstacles.push({ mesh, type, x });
+}
+
+function spawnCoin(x, y, z) {
+  const mesh = new THREE.Mesh(starAssets.geo, starAssets.mat);
+  mesh.add(new THREE.LineSegments(starAssets.edges, starAssets.edgeMat));
+  const halo = new THREE.Sprite(starAssets.haloMat);
+  halo.scale.set(1.3, 1.3, 1);
+  mesh.add(halo);
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  coins.push({ mesh, x, baseY: y, phase: Math.random() * Math.PI * 2 });
+}
+
+/** Reihe von Sternen am Boden entlang einer Spur. */
+function spawnCoinLine(lane, zStart, count = 5, spacing = 2.4) {
+  for (let i = 0; i < count; i++) spawnCoin(LANES[lane], 0.75, zStart - i * spacing);
+}
+
+/**
+ * Sprungphysik passend zum Tempo: Bei hoher Geschwindigkeit wird der Sprung
+ * kürzer (gleiche Höhe, schnellere Kurve), damit dicht folgende Reihen fair bleiben.
+ */
+function jumpPhysics(speed) {
+  const f = Math.pow(Math.max(1, speed / CONFIG.START_SPEED), 0.4);
+  return { gravity: CONFIG.GRAVITY * f * f, velocity: CONFIG.JUMP_VELOCITY * f };
+}
+
+/** Sternbogen über einer Barriere – entspricht der echten Sprungkurve. */
+function spawnCoinArc(lane, zCenter, speed) {
+  const { gravity, velocity } = jumpPhysics(speed);
+  const apex = (velocity * velocity) / (2 * gravity);
+  const tAir = velocity / gravity;                     // Zeit bis zum Scheitelpunkt
+  const spread = Math.min(3.2, speed * tAir * 0.55);   // Bogenbreite folgt der Flugweite
+  for (const k of [-1, -0.5, 0, 0.5, 1]) {
+    const t = Math.abs(k * spread) / speed;
+    const h = Math.max(0, apex - 0.5 * gravity * t * t);
+    spawnCoin(LANES[lane], CONFIG.SHIP_BASE_Y + 0.15 + h * 0.9, zCenter + k * spread);
+  }
+}
+
+function clearWorldObjects() {
+  for (const o of obstacles) scene.remove(o.mesh);
+  for (const c of coins) scene.remove(c.mesh);
+  obstacles.length = 0;
+  coins.length = 0;
+}
+
+/* =============================================================
+   9. SPIELLOGIK
+   ============================================================= */
+const ui = {
+  hud:        document.getElementById('hud'),
+  score:      document.getElementById('hudScore'),
+  coinBox:    document.getElementById('hudCoins'),
+  coinCount:  document.getElementById('hudCoinCount'),
+  speed:      document.getElementById('hudSpeed'),
+  best:       document.getElementById('hudBest'),
+  start:      document.getElementById('startScreen'),
+  startBest:  document.getElementById('startBest'),
+  startBtn:   document.getElementById('startBtn'),
+  over:       document.getElementById('gameOverScreen'),
+  finalScore: document.getElementById('finalScore'),
+  finalCoins: document.getElementById('finalCoins'),
+  finalDist:  document.getElementById('finalDist'),
+  finalBest:  document.getElementById('finalBest'),
+  newRecord:  document.getElementById('newRecord'),
+  retryBtn:   document.getElementById('retryBtn'),
+  pause:      document.getElementById('pauseScreen'),
+  mute:       document.getElementById('muteBtn'),
+  flash:      document.getElementById('flash')
+};
+
+const state = {
+  mode: 'menu',        // 'menu' | 'playing' | 'paused' | 'crashed' | 'over'
+  speed: CONFIG.MENU_SPEED,
+  elapsed: 0,
+  distance: 0,
+  coins: 0,
+  score: 0,
+  lane: 1,
+  x: 0,
+  y: 0,                // Sprunghöhe über der Schwebehöhe
+  vy: 0,
+  gravity: CONFIG.GRAVITY,
+  grounded: true,
+  lastFree: 1,         // freie Spur der letzten Reihe (für faire Folgereihen)
+  rowDist: 0,         // zurückgelegte Strecke seit der letzten Hindernisreihe
+  nextRowGap: 0,
+  shake: 0,
+  overAt: 0,           // Zeitpunkt, ab dem "Erneut versuchen" per Taste möglich ist
+  highscore: parseInt(Store.get(KEY_HIGHSCORE, '0'), 10) || 0
+};
+
+function rowInterval() {
+  return Math.max(CONFIG.ROW_INTERVAL_MIN, CONFIG.ROW_INTERVAL_START - state.elapsed * 0.0075);
+}
+
+/**
+ * Erzeugt eine Reihe von Hindernissen.
+ * Garantie: Mindestens eine Spur ist frei ODER die Reihe ist komplett überspringbar.
+ */
+function spawnRow(z) {
+  const difficulty = clamp(state.elapsed / 90, 0, 1);
+
+  // Breite Warn-Barriere über alle Spuren (nur springen hilft)
+  if (state.elapsed > 6 && Math.random() < 0.08 + 0.07 * difficulty) {
+    spawnObstacle('wide', 1, z);
+    if (Math.random() < 0.6) spawnCoinArc(randInt(3), z, state.speed);
+    return;
+  }
+
+  const layout = [null, null, null];
+  // Die freie Spur wandert höchstens eine Spur weiter → nie zwei Spurwechsel auf einmal nötig
+  const free = clamp(state.lastFree + randInt(3) - 1, 0, 2);
+  state.lastFree = free;
+  const others = shuffle([0, 1, 2].filter(l => l !== free));
+  const count = Math.random() < 0.3 + 0.4 * difficulty ? 2 : 1;
+  for (let k = 0; k < count; k++) {
+    layout[others[k]] = Math.random() < 0.62 ? 'block' : 'low';
+  }
+  layout.forEach((type, lane) => { if (type) spawnObstacle(type, lane, z); });
+
+  // Sterne: entweder Bogen über einer Barriere oder Linie in einer freien Spur
+  const lowLanes = layout.map((t, i) => t === 'low' ? i : -1).filter(i => i >= 0);
+  const r = Math.random();
+  if (lowLanes.length && r < 0.4) {
+    spawnCoinArc(lowLanes[randInt(lowLanes.length)], z, state.speed);
+  } else if (r < 0.75) {
+    spawnCoinLine(free, z - 3.5, 4 + randInt(3));
+  }
+}
+
+function updateHUD() {
+  ui.score.textContent = fmt(state.score);
+  ui.coinCount.textContent = state.coins;
+  ui.speed.textContent = (state.speed / CONFIG.START_SPEED).toFixed(1) + 'x';
+  ui.best.textContent = fmt(Math.max(state.highscore, state.score));
+}
+
+function resetGame() {
+  clearWorldObjects();
+  trail.clear(); sparks.clear(); burst.clear();
+  Object.assign(state, {
+    speed: CONFIG.START_SPEED, elapsed: 0, distance: 0, coins: 0, score: 0,
+    lane: 1, x: 0, y: 0, vy: 0, gravity: CONFIG.GRAVITY, grounded: true, shake: 0, lastFree: 1,
+    rowDist: 0, nextRowGap: CONFIG.START_SPEED * CONFIG.START_GRACE
+  });
+  ship.group.visible = true;
+  ship.group.position.set(0, CONFIG.SHIP_BASE_Y, 0);
+  ship.group.rotation.set(0, 0, 0);
+  updateHUD();
+}
+
+function startGame() {
+  Sound.init();
+  resetGame();
+  state.mode = 'playing';
+  ui.start.classList.add('hidden');
+  ui.over.classList.add('hidden');
+  ui.hud.classList.remove('hidden');
+  ui.startBtn.blur();
+  ui.retryBtn.blur();
+  Sound.start();
+}
+
+function crash() {
+  state.mode = 'crashed';
+  Sound.crash();
+  const p = ship.group.position;
+  explode(p.x, p.y, p.z);
+  ship.group.visible = false;
+  state.shake = 0.9;
+  ui.flash.classList.remove('on');
+  void ui.flash.offsetWidth;      // Animation neu starten
+  ui.flash.classList.add('on');
+
+  const isRecord = state.score > state.highscore;
+  if (isRecord) {
+    state.highscore = state.score;
+    Store.set(KEY_HIGHSCORE, state.highscore);
+  }
+
+  setTimeout(() => {
+    ui.finalScore.textContent = fmt(state.score);
+    ui.finalCoins.textContent = state.coins;
+    ui.finalDist.textContent = fmt(state.distance) + ' m';
+    ui.finalBest.textContent = fmt(state.highscore);
+    ui.newRecord.classList.toggle('hidden', !isRecord);
+    ui.startBest.textContent = fmt(state.highscore);
+    ui.hud.classList.add('hidden');
+    ui.over.classList.remove('hidden');
+    state.mode = 'over';
+    state.overAt = performance.now() + 450;
+  }, 1150);
+}
+
+/* ---------- Spieleraktionen ---------- */
+function changeLane(dir) {
+  if (state.mode !== 'playing') return;
+  const next = clamp(state.lane + dir, 0, 2);
+  if (next === state.lane) return;
+  state.lane = next;
+  Sound.lane();
+}
+
+function jump() {
+  if (state.mode !== 'playing' || !state.grounded) return;
+  const { gravity, velocity } = jumpPhysics(state.speed);
+  state.vy = velocity;
+  state.gravity = gravity;
+  state.grounded = false;
+  Sound.jump();
+}
+
+/* ---------- Pro-Frame-Updates ---------- */
+function updatePlayer(dt, time) {
+  const targetX = LANES[state.lane];
+  state.x = lerp(state.x, targetX, Math.min(1, dt * 14));
+
+  if (!state.grounded) {
+    state.vy -= state.gravity * dt;
+    state.y += state.vy * dt;
+    if (state.y <= 0) {
+      state.y = 0;
+      state.vy = 0;
+      state.grounded = true;
+    }
+  }
+
+  const hover = state.grounded ? Math.sin(time * 7) * 0.04 : 0;
+  ship.group.position.set(state.x, CONFIG.SHIP_BASE_Y + state.y + hover, 0);
+  ship.group.rotation.z = (state.x - targetX) * 0.38;                         // Kurvenneigung
+  ship.group.rotation.x = state.grounded ? 0 : clamp(state.vy * 0.025, -0.3, 0.3); // Nase hoch/runter
+  ship.engineHalo.material.opacity = 0.75 + Math.sin(time * 40) * 0.25;
+}
+
+function updateObstacles(dist) {
+  const px = state.x;
+  const pyBottom = CONFIG.SHIP_BASE_Y + state.y - 0.28;
+  const pyTop = CONFIG.SHIP_BASE_Y + state.y + 0.22;
+
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    const prevZ = o.mesh.position.z;
+    o.mesh.position.z += dist;
+    const z = o.mesh.position.z;
+
+    if (state.mode === 'playing') {
+      const t = OBST_TYPES[o.type];
+      // "Sweep"-Test in z-Richtung, damit bei hohem Tempo nichts durchtunnelt
+      const zMin = Math.min(prevZ, z) - t.hd;
+      const zMax = Math.max(prevZ, z) + t.hd;
+      const hitZ = zMin <= CONFIG.PLAYER_HALF_D && zMax >= -CONFIG.PLAYER_HALF_D;
+      const hitX = Math.abs(px - o.x) < t.hw + CONFIG.PLAYER_HALF_W;
+      const hitY = pyBottom < t.h && pyTop > 0;
+      if (hitZ && hitX && hitY) {
+        crash();
+        return;
+      }
+    }
+
+    if (z > CONFIG.DESPAWN_Z) {
+      scene.remove(o.mesh);
+      obstacles.splice(i, 1);
+    }
+  }
+}
+
+function updateCoins(dist, dt, time) {
+  const py = CONFIG.SHIP_BASE_Y + state.y;
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const c = coins[i];
+    const prevZ = c.mesh.position.z;
+    c.mesh.position.z += dist;
+    c.mesh.rotation.y += dt * 3.2;
+    c.mesh.position.y = c.baseY + Math.sin(time * 4 + c.phase) * 0.08;
+    const z = c.mesh.position.z;
+
+    if (state.mode === 'playing') {
+      // Nächster Punkt der überstrichenen z-Strecke zum Spieler (z = 0)
+      const zMin = Math.min(prevZ, z), zMax = Math.max(prevZ, z);
+      const dz = (zMin <= 0 && zMax >= 0) ? 0 : Math.min(Math.abs(zMin), Math.abs(zMax));
+      const dx = c.x - state.x;
+      const dy = c.mesh.position.y - py;
+      if (dx * dx + dy * dy + dz * dz < 1.15 * 1.15) {
+        state.coins++;
+        Sound.coin();
+        emitSparkle(c.x, c.mesh.position.y, 0);
+        scene.remove(c.mesh);
+        coins.splice(i, 1);
+        ui.coinBox.classList.remove('pop');
+        void ui.coinBox.offsetWidth;
+        ui.coinBox.classList.add('pop');
+        continue;
+      }
+    }
+
+    if (z > CONFIG.DESPAWN_Z) {
+      scene.remove(c.mesh);
+      coins.splice(i, 1);
+    }
+  }
+}
+
+function updateCamera(dt, time) {
+  const k = Math.min(1, dt * 5);
+  camera.position.x = lerp(camera.position.x, state.x * 0.45, k);
+  camera.position.y = lerp(camera.position.y, 3.3 + state.y * 0.3, k);
+  camera.position.z = 7.2;
+  camLook.set(state.x * 0.3, 1.1 + state.y * 0.15, -8);
+
+  // Kamerawackeln beim Crash
+  if (state.shake > 0) {
+    state.shake = Math.max(0, state.shake - dt * 1.6);
+    const s = state.shake * state.shake * 0.9;
+    camera.position.x += rand(-s, s);
+    camera.position.y += rand(-s, s);
+  }
+  camera.lookAt(camLook);
+
+  // Sichtfeld weitet sich mit dem Tempo → Geschwindigkeitsgefühl
+  const speedT = clamp((state.speed - CONFIG.START_SPEED) / (CONFIG.MAX_SPEED - CONFIG.START_SPEED), 0, 1);
+  const fov = BASE_FOV + (state.mode === 'playing' ? speedT * 12 : 0);
+  if (Math.abs(camera.fov - fov) > 0.01) {
+    camera.fov = lerp(camera.fov, fov, k);
+    camera.updateProjectionMatrix();
+  }
+}
+
+/* =============================================================
+   10. EINGABE
+   ============================================================= */
+window.addEventListener('keydown', e => {
+  const code = e.code;
+  // Scrollen/Button-Aktivierung durch Leertaste & Pfeile verhindern
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
+
+  if (code === 'KeyM') { toggleMute(); return; }
+  if (code === 'KeyP' || code === 'Escape') { togglePause(); return; }
+
+  if (state.mode === 'playing') {
+    if (e.repeat) return;
+    if (code === 'KeyA' || code === 'ArrowLeft')  changeLane(-1);
+    else if (code === 'KeyD' || code === 'ArrowRight') changeLane(1);
+    else if (code === 'Space' || code === 'KeyW' || code === 'ArrowUp') jump();
+  } else if (state.mode === 'menu') {
+    if (code === 'Enter' || code === 'Space') startGame();
+  } else if (state.mode === 'over') {
+    // !e.repeat: gedrückt gehaltene Sprungtaste startet nicht versehentlich neu
+    if ((code === 'Enter' || code === 'Space') && !e.repeat && performance.now() > state.overAt) startGame();
+  }
+});
+
+// Touch-Steuerung: Wischen links/rechts = Spurwechsel, Tippen/Wischen hoch = Springen
+let touchStart = null;
+window.addEventListener('touchstart', e => {
+  if (e.target.closest('button')) return;
+  const t = e.changedTouches[0];
+  touchStart = { x: t.clientX, y: t.clientY };
+}, { passive: true });
+window.addEventListener('touchend', e => {
+  if (!touchStart || state.mode !== 'playing') { touchStart = null; return; }
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+  touchStart = null;
+  if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) changeLane(dx > 0 ? 1 : -1);
+  else jump();
+}, { passive: true });
+
+/** Pause an/aus – nur während eines laufenden Spiels. */
+function togglePause() {
+  if (state.mode === 'playing') {
+    state.mode = 'paused';
+    ui.pause.classList.remove('hidden');
+  } else if (state.mode === 'paused') {
+    state.mode = 'playing';
+    ui.pause.classList.add('hidden');
+  }
+}
+ui.pause.addEventListener('click', () => { if (state.mode === 'paused') togglePause(); });
+// Automatisch pausieren, wenn der Tab in den Hintergrund wechselt
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.mode === 'playing') togglePause();
+});
+
+function toggleMute() {
+  Sound.init();
+  const muted = Sound.toggleMute();
+  ui.mute.classList.toggle('muted', muted);
+}
+
+ui.startBtn.addEventListener('click', startGame);
+ui.retryBtn.addEventListener('click', startGame);
+ui.mute.addEventListener('click', e => { toggleMute(); ui.mute.blur(); });
+ui.mute.classList.toggle('muted', Sound.isMuted());
+ui.startBest.textContent = fmt(state.highscore);
+updateHUD();
+
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  if (composer) composer.setSize(w, h);
+});
+
+/* =============================================================
+   11. HAUPTSCHLEIFE
+   ============================================================= */
+let lastTime = performance.now();
+let elapsedTotal = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - lastTime) / 1000);  // große Sprünge (Tab-Wechsel) abfangen
+  lastTime = now;
+
+  // Pausiert: Bild einfrieren, nur weiter rendern
+  if (state.mode === 'paused') {
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
+    return;
+  }
+  elapsedTotal += dt;
+
+  if (state.mode === 'playing') {
+    state.elapsed += dt;
+    state.speed = Math.min(CONFIG.MAX_SPEED, CONFIG.START_SPEED + state.elapsed * CONFIG.ACCEL);
+  } else if (state.mode === 'menu') {
+    state.speed = CONFIG.MENU_SPEED;
+  } else {
+    state.speed *= Math.exp(-dt * 3.5);                // nach dem Crash ausrollen
+  }
+
+  const dist = state.speed * dt;
+  scrollEnvironment(dist);
+
+  if (state.mode === 'playing' || state.mode === 'menu') {
+    updatePlayer(dt, elapsedTotal);
+    emitTrail(dt, state.speed);
+  }
+
+  if (state.mode === 'playing') {
+    state.distance += dist;
+
+    // Neue Hindernisreihen erzeugen
+    state.rowDist += dist;
+    if (state.rowDist >= state.nextRowGap) {
+      state.rowDist -= state.nextRowGap;
+      spawnRow(CONFIG.SPAWN_Z + state.rowDist);
+      state.nextRowGap = state.speed * rowInterval();
+    }
+  }
+
+  updateObstacles(dist);
+  updateCoins(dist, dt, elapsedTotal);
+
+  if (state.mode === 'playing') {
+    state.score = Math.floor(state.distance) + state.coins * CONFIG.COIN_POINTS;
+    updateHUD();
+  }
+
+  // Partikel & Effekte
+  trail.update(dt);
+  sparks.update(dt);
+  sparks.shiftZ(dist * 0.6);
+  burst.update(dt);
+  burst.shiftZ(dist);
+  for (let i = effects.length - 1; i >= 0; i--) {
+    if (!effects[i](dt)) effects.splice(i, 1);
+  }
+
+  // Schiffslicht folgt dem Schiff (flackert beim Crash kurz auf)
+  shipLight.position.set(ship.group.position.x, ship.group.position.y + 0.6, 0.4);
+  shipLight.intensity = ship.group.visible ? 2.2 : Math.max(0, shipLight.intensity - dt * 3);
+  if (state.mode === 'crashed' && state.shake > 0.85) shipLight.intensity = 8;
+
+  updateCamera(dt, elapsedTotal);
+
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
